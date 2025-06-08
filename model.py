@@ -1,68 +1,80 @@
+# model.py
 import torch
-from transformers import AutoModelForCausalLM
-from typing import Optional
+from transformers import T5ForConditionalGeneration, T5Tokenizer
+from peft import get_peft_model, PromptTuningConfig, TaskType, PeftModel
 from config import Config
 
-class PromptTuningModel(torch.nn.Module):
+class PEFTPromptTuningModel:
     def __init__(self, config: Config):
-        super().__init__()
         self.config = config
         
-        # Load base GPT model
-        self.model = AutoModelForCausalLM.from_pretrained(config.model_name)
-        
-        # Initialize prompt embeddings
-        self.prompt_embeddings = torch.nn.Embedding(
-            config.prompt_length,
-            self.model.config.hidden_size
+        # Load tokenizer and model
+        self.tokenizer = T5Tokenizer.from_pretrained(config.model_name)
+        self.base_model = T5ForConditionalGeneration.from_pretrained(
+            config.model_name,
+            torch_dtype=torch.float32
         )
         
-        # Freeze base model weights
-        for param in self.model.parameters():
-            param.requires_grad = False
-            
+        # Configure PEFT for T5
+        self.peft_config = PromptTuningConfig(
+            task_type=TaskType.SEQ_2_SEQ_LM,  # T5 is seq2seq, not causal LM
+            prompt_tuning_init=config.prompt_tuning_init,
+            num_virtual_tokens=config.num_virtual_tokens,
+            prompt_tuning_init_text=config.prompt_tuning_init_text,
+            tokenizer_name_or_path=config.model_name,
+        )
+        
+        # Create PEFT model
+        self.model = get_peft_model(self.base_model, self.peft_config)
+        
+        # Print trainable parameters
+        self.model.print_trainable_parameters()
+        
     def forward(self, input_ids, attention_mask, labels=None):
-        batch_size = input_ids.shape[0]
-        device = input_ids.device
-
-        # Generate prompt sequence and embeddings
-        prompt_sequence = torch.arange(self.config.prompt_length, device=device).unsqueeze(0).expand(batch_size, -1)
-        prompt_embeddings = self.prompt_embeddings(prompt_sequence)  # (batch, prompt_length, hidden_size)
-
-        # Get input token embeddings from the model's embedding layer
-        input_embeddings = self.model.transformer.wte(input_ids)  # (batch, seq_len, hidden_size)
-
-        # Concatenate prompt and input embeddings
-        inputs_embeds = torch.cat([prompt_embeddings, input_embeddings], dim=1)  # (batch, prompt+seq_len, hidden_size)
-
-        # Update attention mask to account for prompt tokens
-        prompt_attention = torch.ones((batch_size, self.config.prompt_length), device=device, dtype=attention_mask.dtype)
-        attention_mask = torch.cat([prompt_attention, attention_mask], dim=1)  # (batch, prompt+seq_len)
-
-        # Shift labels to the right to match the input (pad prompt positions with -100 so they're ignored in loss)
-        if labels is not None:
-            ignore_labels = torch.full((batch_size, self.config.prompt_length), -100, device=device, dtype=labels.dtype)
-            labels = torch.cat([ignore_labels, labels], dim=1)
-
-        outputs = self.model(
-            inputs_embeds=inputs_embeds,
+        """Forward pass through the PEFT model"""
+        return self.model(
+            input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels
         )
-        return outputs
-        
-    def save_prompt(self, path: str):
-        """Save prompt embeddings"""
-        torch.save({
-            'prompt_embeddings': self.prompt_embeddings.weight,
-        }, path)
+    
+    def save_pretrained(self, save_directory):
+        """Save the PEFT adapter"""
+        self.model.save_pretrained(save_directory)
         
     @classmethod
-    def load_prompt(cls, model_path: str, config: Config):
-        """Load prompt-tuned model"""
-        model = cls(config)
-        checkpoint = torch.load(model_path)
+    def load_pretrained(cls, config: Config, adapter_path: str):
+        """Load a trained PEFT model"""
+        # Load tokenizer
+        tokenizer = T5Tokenizer.from_pretrained(config.model_name)
         
-        model.prompt_embeddings.weight.data.copy_(checkpoint['prompt_embeddings'])
+        # Load base model
+        base_model = T5ForConditionalGeneration.from_pretrained(
+            config.model_name,
+            torch_dtype=torch.float32
+        )
         
-        return model
+        # Load PEFT model
+        model = PeftModel.from_pretrained(base_model, adapter_path)
+        
+        # Create wrapper
+        instance = cls.__new__(cls)
+        instance.config = config
+        instance.tokenizer = tokenizer
+        instance.base_model = base_model
+        instance.model = model
+        
+        return instance
+    
+    def generate(self, input_ids, attention_mask, **kwargs):
+        """Generate text using the PEFT model"""
+        return self.model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **kwargs
+        )
+    
+    def to(self, device):
+        """Move model to device"""
+        self.model = self.model.to(device)
+        return self
