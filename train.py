@@ -6,8 +6,6 @@ import os
 
 def main():
     config = Config()
-
-    # Clear MPS cache if using Apple Silicon
     
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
@@ -17,7 +15,7 @@ def main():
     
     # Create dataset
     dataset = QuestionDataset(config, trainer.model.tokenizer)
-    train_loader, val_loader = dataset.create_dataloader(config.train_data_path)
+    train_loader, val_loader = dataset.create_dataloader()
     
     print(f"Training with {len(train_loader.dataset)} samples")
     print(f"Validation with {len(val_loader.dataset)} samples")

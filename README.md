@@ -16,3 +16,6 @@ This repository provides a lightweight **Prompt Tuning** pipeline. It fine-tunes
 ---
 
 # Steps
+1. Install requirements.txt: `pip install -r requirements.txt`
+2. Train models: `python train.py`
+3. Test with inputs: `python main.py`

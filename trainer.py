@@ -48,6 +48,7 @@ class PEFTQuestionTrainer:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             tokenizer=self.model.tokenizer,
+            #data_collator=self.model.get_data_collator() 
         )
         
         # Train

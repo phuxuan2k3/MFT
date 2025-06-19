@@ -28,147 +28,180 @@ class QuestionDataset:
         if not path.exists():
             return []
         return [str(p) for p in path.rglob('*.jsonl') if p.is_file()]
+    
+    def generate_type_specific_fallbacks(self, topic: str, seniority: str, question_type: str, length: int) -> list:
+        """Generate fallback questions based on question type and other parameters"""
         
+        fallback_templates = {
+            'Multiple Choice': [
+                f"What is the primary purpose of {topic}?",
+                f"Which of the following best describes {topic}?",
+                f"What is a key characteristic of {topic}?",
+                f"Which approach is recommended when working with {topic}?",
+                f"What is the main advantage of using {topic}?"
+            ],
+            
+            'Multiple Select': [
+                f"Which of the following are benefits of {topic}? (Select all that apply)",
+                f"Which statements about {topic} are correct?",
+                f"Which of these are common use cases for {topic}?",
+                f"Which best practices should be followed when using {topic}?",
+                f"Which of the following are key components of {topic}?"
+            ],
+            
+            'Short Answer': [
+                f"Explain what {topic} is and why it's important.",
+                f"Describe how {topic} works in practice.",
+                f"What are the main benefits of using {topic}?",
+                f"How would you implement {topic} in a project?",
+                f"What challenges might you face when working with {topic}?"
+            ],
+            
+            'True/False': [
+                f"{topic} is primarily used for data storage.",
+                f"{topic} requires significant computational resources.",
+                f"{topic} is suitable for beginners to learn.",
+                f"{topic} integrates well with modern development frameworks.",
+                f"{topic} is an open-source technology."
+            ],
+            
+            'Fill in the Blank': [
+                f"The main purpose of {topic} is to ___ data efficiently.",
+                f"When implementing {topic}, developers should consider ___ as a key factor.",
+                f"The most common use case for {topic} is ___.",
+                f"To optimize {topic} performance, you should ___.",
+                f"The key difference between {topic} and similar technologies is ___."
+            ],
+            
+            'Code Completion': [
+                f"Complete the {topic} implementation code snippet.",
+                f"Fix the syntax error in this {topic} code example.",
+                f"Write the missing function for {topic} integration.",
+                f"Complete the {topic} configuration setup code.",
+                f"Implement the error handling for this {topic} operation."
+            ],
+            
+            'Scenario-Based': [
+                f"Your team needs to implement {topic} for a high-traffic application. What approach would you take?",
+                f"A client reports performance issues with their {topic} implementation. How would you troubleshoot?",
+                f"You need to choose between different {topic} solutions for a new project. What factors would you consider?",
+                f"Your application using {topic} needs to scale to handle 10x more users. What would you do?",
+                f"A security audit found vulnerabilities in your {topic} setup. How would you address them?"
+            ]
+        }
+        
+        # Adjust complexity based on seniority level
+        if seniority.lower() in ['senior', 'lead', 'principal']:
+            # Add complexity indicators for senior levels
+            templates = fallback_templates.get(question_type, fallback_templates['Multiple Choice'])
+            templates = [t.replace(f"{topic}", f"advanced {topic} concepts") for t in templates]
+        elif seniority.lower() in ['intern', 'junior']:
+            # Simplify for junior levels
+            templates = fallback_templates.get(question_type, fallback_templates['Multiple Choice'])
+            templates = [t.replace("implement", "use").replace("optimization", "basic setup") for t in templates]
+        else:
+            templates = fallback_templates.get(question_type, fallback_templates['Multiple Choice'])
+        
+        # Return the requested number of questions, cycling through templates if needed
+        questions = []
+        for i in range(length):
+            questions.append(templates[i % len(templates)])
+        
+        return questions
+
     def format_input_output(self, question: Dict) -> Tuple[str, str]:
-        """Create input-output pair for T5 training with consistent formatting"""
-        
-        # Create varied input formats to make model more robust
         topic = question.get('topic', 'general')
         seniority = question.get('seniority', 'Intern')
         context = question.get('context', '')
+        language = question.get('language', 'English')
+        question_type = question.get('question_type', 'Multiple Choice')
+        questions = question.get('questions', [])
+        length = question.get('length', len(questions) if questions else 5)
         
-        # Input variations
-        input_variations = [
-            f"Generate a technical multiple choice question about {topic} for {seniority} level",
-            f"Create a {seniority} level MCQ about {topic}",
-            f"Generate a technical multiple choice question about {topic} for {seniority} level with context",
+        # Question type specific instructions and guidelines
+        type_specific_info = get_question_type_instructions(question_type)
+        
+        # Base instruction templates with question type integration
+        instruction_templates = [
+            f"Your task is to generate {length} {type_specific_info['type_description']} technical questions about {{topic}} suitable for {{seniority}} level developers.",
+            f"You are a technical educator. Create {length} {type_specific_info['type_description']} questions about {{topic}} for {{seniority}} level students.",
+            f"Design {length} {type_specific_info['type_description']} technical assessment questions about {{topic}} for {{seniority}} level evaluation."
         ]
         
-        # Add context to some inputs
-        if context and len(context) > 20:
-            context_short = context[:150] + "..." if len(context) > 150 else context
-            input_text = f"{random.choice(input_variations)} with context: {context_short}"
+        # Randomly select an instruction template for variety during training
+        import random
+        base_instruction = random.choice(instruction_templates).format(
+            topic=topic, seniority=seniority
+        )
+        
+        # Add language specification if not English
+        if language.lower() != 'english':
+            base_instruction += f" Generate the questions in {language}."
+        
+        # Add context with clear instruction
+        if context.strip():
+            context_short = context[:500] + "..." if len(context) > 500 else context
+            base_instruction += f" Use this context as background information: {context_short}"
+        
+        # Add question type specific formatting and guidelines
+        base_instruction += f" {type_specific_info['format_instruction']}"
+        base_instruction += f" {type_specific_info['quality_guidelines']}"
+        
+        input_text = base_instruction
+        
+        # Target: clean numbered list of questions with type-appropriate fallbacks
+        if questions:
+            target_text = "\n".join([f"{i+1}. {q.strip()}" for i, q in enumerate(questions)])
         else:
-            input_text = random.choice(input_variations)
-        
-        # Create consistent target format
-        options_formatted = []
-        for i, option in enumerate(question.get('options', [])):
-            letter = chr(65 + i)  # A, B, C, D, E
-            options_formatted.append(f"{letter}) {option}")
-        
-        options_text = "\n".join(options_formatted)
-        
-        # Ensure answer is in correct format
-        answer = question.get('answer', 'A')
-        if len(answer) > 1:
-            # If answer is full text, try to match to option
-            for i, option in enumerate(question.get('options', [])):
-                if answer.lower() in option.lower() or option.lower() in answer.lower():
-                    answer = chr(65 + i)
-                    break
-        
-        target_text = f"""Topic: {topic}
-                        Context: {context}
-                        Question: {question.get('question', '')}
-                        Options:
-                        {options_text}
-                        Answer: {answer}
-                        Type: {question.get('type', 'Multiple Choice')}
-                        Seniority: {seniority}"""
+            # Generate type-specific fallback questions
+            fallback_questions = self.generate_type_specific_fallbacks(topic, seniority, question_type, length)
+            target_text = "\n".join([f"{i+1}. {q}" for i, q in enumerate(fallback_questions)])
         
         return input_text, target_text
         
-    def create_synthetic_data(self, count: int = 100) -> List[Dict]:
-        """Create synthetic training data if no real data available"""
-        synthetic_questions = []
-        
-        topics = ['Database', 'Python', 'JavaScript', 'Machine Learning', 'Web Development', 
-                 'Data Structures', 'Algorithms', 'SQL', 'Cloud Computing', 'API Design']
-        
-        seniorities = ['Intern', 'Junior', 'Senior']
-        
-        for i in range(count):
-            topic = random.choice(topics)
-            seniority = random.choice(seniorities)
-            
-            # Create a basic question structure
-            question_data = {
-                'topic': topic,
-                'seniority': seniority,
-                'context': f'This is about {topic} fundamentals for {seniority} level.',
-                'question': f'What is a key concept in {topic}?',
-                'options': [
-                    f'{topic} concept A',
-                    f'{topic} concept B', 
-                    f'{topic} concept C',
-                    f'{topic} concept D'
-                ],
-                'answer': 'A',
-                'type': 'Multiple Choice'
-            }
-            synthetic_questions.append(question_data)
-        
-        return synthetic_questions
-        
-    def create_dataloader(self, data_path: str) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-        """Create training and validation dataloaders"""
-        all_files = self.get_all_files(data_path)
-        all_questions = []
-        
-        # Load real data if available
-        if all_files:
-            for file_path in all_files:
-                try:
-                    questions = self.load_jsonl_file(file_path)
-                    all_questions.extend(questions)
-                except Exception as e:
-                    print(f"Error loading {file_path}: {e}")
-                    continue
-        
-        # If no real data, create synthetic data
-        if not all_questions:
-            print("No real data found, creating synthetic training data...")
-            all_questions = self.create_synthetic_data(200)
-        
-        print(f"Total questions available: {len(all_questions)}")
-        
-        # Data augmentation: create variations of existing questions
-        augmented_questions = []
-        for q in all_questions:
-            # Original question
-            augmented_questions.append(q)
-            
-            # Create variation with different seniorities
-            for seniority in ['Intern', 'Junior', 'Senior']:
-                if seniority != q.get('seniority', 'Intern'):
-                    q_variant = q.copy()
-                    q_variant['seniority'] = seniority
-                    augmented_questions.append(q_variant)
-        
-        all_questions = augmented_questions
-        
-        # Split into train/validation
-        random.seed(42)
-        random.shuffle(all_questions)
-        train_size = int(len(all_questions) * 0.8)
-        train_questions = all_questions[:train_size]
-        val_questions = all_questions[train_size:]
-        
+    def create_dataloader(self, train_data_path: str = None, val_data_path: str = None) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+        """
+        Create training and validation dataloaders using separate paths for train and validation data.
+        """
+        train_data_path = train_data_path or self.config.train_data_path
+        val_data_path = val_data_path or self.config.val_data_path
+
+        # Load train data
+        train_files = self.get_all_files(train_data_path)
+        train_questions = []
+        for file_path in train_files:
+            try:
+                questions = self.load_jsonl_file(file_path)
+                train_questions.extend(questions)
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+                continue
+
+        # Load validation data
+        val_files = self.get_all_files(val_data_path)
+        val_questions = []
+        for file_path in val_files:
+            try:
+                questions = self.load_jsonl_file(file_path)
+                val_questions.extend(questions)
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+                continue
+
         print(f"Training questions: {len(train_questions)}")
         print(f"Validation questions: {len(val_questions)}")
-        
+
         # Create datasets
         train_dataset = QuestionDatasetWrapper(train_questions, self.tokenizer, self.config)
         val_dataset = QuestionDatasetWrapper(val_questions, self.tokenizer, self.config)
-        
+
         # Create dataloaders
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.config.batch_size,
             shuffle=True,
             collate_fn=self.collate_fn,
-            num_workers=0  # Avoid multiprocessing issues
+            num_workers=0
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
@@ -177,7 +210,7 @@ class QuestionDataset:
             collate_fn=self.collate_fn,
             num_workers=0
         )
-        
+
         return train_loader, val_loader
     
     def collate_fn(self, batch):
@@ -237,3 +270,60 @@ class QuestionDatasetWrapper(torch.utils.data.Dataset):
             'attention_mask': attention_mask,
             'labels': labels
         }
+    
+
+def get_question_type_instructions(question_type: str) -> dict:
+        """Get question type specific instructions and guidelines"""
+        
+        type_configs = {
+            'Multiple Choice': {
+                'type_description': 'multiple choice',
+                'format_instruction': 'Present your response as a numbered list where each line contains only one clear, concise question suitable for a multiple choice exam. Do not include answer options or answers.',
+                'quality_guidelines': 'Each question should be unambiguous, focused on a single concept, and answerable by selecting from multiple options (not provided).'
+            },
+            
+            'Multiple Select': {
+                'type_description': 'multiple select',
+                'format_instruction': 'Present your response as a numbered list where each line contains one question that requires selecting multiple correct options from a list.',
+                'quality_guidelines': 'Frame questions using phrases like "Which of the following are true about...", "Select all that apply", or "Which options correctly describe...". Ensure multiple correct answers exist.'
+            },
+            
+            'Short Answer': {
+                'type_description': 'short answer',
+                'format_instruction': 'Present your response as a numbered list where each line contains one question that can be answered with a brief explanation or short phrase.',
+                'quality_guidelines': 'Questions should be open-ended but focused, requiring concise explanations rather than yes/no answers. Avoid questions that need lengthy explanations.'
+            },
+            
+            'True/False': {
+                'type_description': 'true/false',
+                'format_instruction': 'Present your response as a numbered list where each line contains one statement that can be evaluated as either true or false.',
+                'quality_guidelines': 'Create clear, unambiguous statements about the topic. Avoid statements that are partially true or context-dependent.'
+            },
+            
+            'Fill in the Blank': {
+                'type_description': 'fill in the blank',
+                'format_instruction': 'Present your response as a numbered list where each line contains one sentence with a blank space (___) to be filled.',
+                'quality_guidelines': 'Create sentences with clear context clues that lead to a specific correct answer. Use underscores (___) to indicate the blank space.'
+            },
+            
+            'Code Completion': {
+                'type_description': 'code completion',
+                'format_instruction': 'Present your response as a numbered list where each line contains one question about completing or fixing code snippets.',
+                'quality_guidelines': 'Focus on practical coding scenarios that require understanding of syntax, logic, or best practices. Questions should be specific to coding tasks.'
+            },
+            
+            'Scenario-Based': {
+                'type_description': 'scenario-based',
+                'format_instruction': 'Present your response as a numbered list where each line contains one question presenting a real-world scenario that requires problem-solving.',
+                'quality_guidelines': 'Create realistic workplace or project scenarios that test practical application of knowledge. Questions should require analytical thinking and decision-making.'
+            }
+        }
+        
+        # Default configuration for unknown question types
+        default_config = {
+            'type_description': 'technical',
+            'format_instruction': 'Present your response as a numbered list where each line contains one question.',
+            'quality_guidelines': 'Make sure each question is clear, specific, and tests understanding of the topic.'
+        }
+        
+        return type_configs.get(question_type, default_config)
