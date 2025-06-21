@@ -1,0 +1,10 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Output directory
+output/ 
