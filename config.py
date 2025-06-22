@@ -6,7 +6,7 @@ from typing import List
 class Config:
     # FLAN-T5 large model
     model_name: str = "google/flan-t5-large"
-    batch_size: int = 4
+    batch_size: int = 2 # Reduced batch size for memory efficiency
     learning_rate: float = 1e-3
     epochs: int = 1
     
